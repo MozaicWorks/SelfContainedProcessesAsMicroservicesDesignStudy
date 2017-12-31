@@ -31,7 +31,6 @@ DatabaseOperations databaseOperations = new DatabaseOperations(adminSql: adminSq
 selfSetup(databaseOperations, normalUserSecretsProvider, logger)
 
 Sql normalUserSql = normalUserSqlBuilder.getSql()
-
 selfTest(normalUserSql, logger)
 
 def result = createUser(createUserParameters, normalUserSql, logger)
@@ -63,7 +62,16 @@ static def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider,
 			dbName: databaseOperations.dbName,
 			secretsProvider: userSecretsProvider,
 	)
+
 	createTable(userSqlBuilder.getSql(), logger)
+}
+
+static def existsTable(sql) {
+	def rows = sql.firstRow(
+			"""
+	SHOW TABLES LIKE 'USER';
+""")
+	return (rows?.count == 1)
 }
 
 static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvider) {
@@ -74,7 +82,8 @@ static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvide
 }
 
 static def createTable(Sql sql, def logger) {
-	def commandString = """
+	if (!existsTable(sql)) {
+		def commandString = """
 			CREATE TABLE `USER`(
                 `ID` INT(11) NOT NULL AUTO_INCREMENT,
                 `FIRST_NAME` VARCHAR(500) NOT NULL,
@@ -84,11 +93,14 @@ static def createTable(Sql sql, def logger) {
                 )
     """
 
-	def result = new Command().executeSqlCommand(commandString, "createTableUser", 1, sql, logger)
-	result.log(logger)
+		def result = new Command().executeSqlCommand(commandString, "createTableUser", 1, sql, logger)
+		result.log(logger)
+	} else {
+		logger.info("Table USER exists; nothing to do")
+	}
 }
 
-def selfTest(sql, logger) {
+static def selfTest(sql, logger) {
 	logger.info("START SELF-TEST")
 	def firstName = RandomStringUtils.randomAlphabetic(100)
 	def lastName = RandomStringUtils.randomAlphabetic(100)
