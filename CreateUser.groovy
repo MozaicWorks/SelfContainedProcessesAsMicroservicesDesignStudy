@@ -24,10 +24,11 @@ def adminSql = new MySqlBuilder(
 
 def normalUserSqlBuilder = new MySqlBuilder(
 		dbName: dbName,
-		secretsProvider: normalUserSecretsProvider,
+		secretsProvider: normalUserSecretsProvider
 )
 
-selfSetup(adminSql, dbName, normalUserSecretsProvider, logger)
+def databaseOperations = new DatabaseOperations(adminSql: adminSql, dbName: dbName, logger: logger)
+selfSetup(databaseOperations, normalUserSecretsProvider, logger)
 
 def normalUserSql = normalUserSqlBuilder.getSql()
 
@@ -36,7 +37,7 @@ selfTest(normalUserSql, logger)
 def result = createUser(createUserParameters, normalUserSql, logger)
 result.log(logger)
 
-selfCleanup(adminSql, dbName, normalUserSecretsProvider, logger)
+selfCleanup(databaseOperations, normalUserSecretsProvider)
 
 def createUser(CreateUserParameters parameters, Sql sql, def logger) {
 	logger.info("Creating user $parameters")
@@ -52,66 +53,22 @@ def createUser(CreateUserParameters parameters, Sql sql, def logger) {
 	return executeSqlCommand(commandString, "createUser", 1, sql, logger)
 }
 
-def selfSetup(Sql adminSql, String dbName, userSecretsProvider, logger) {
-	if (databaseExists(adminSql, dbName)) {
-		logger.info("Nothing to setup for database $dbName")
-		return
-	}
-	createDatabase(dbName, adminSql, userSecretsProvider, logger)
+def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
+	databaseOperations.createDatabase(userSecretsProvider)
+	databaseOperations.createUser(userSecretsProvider)
 
 	def userSqlBuilder = new MySqlBuilder(
-			dbName: dbName,
+			dbName: databaseOperations.dbName,
 			secretsProvider: userSecretsProvider,
 	)
 	createTable(userSqlBuilder.getSql(), logger)
 }
 
-def selfCleanup(Sql adminSql, String dbName, userSecretsProvider, logger) {
-	if (databaseExists(adminSql, dbName)) {
-		dropDatabase(dbName, adminSql, logger)
-	} else {
-		logger.info("Database $dbName doesn't exist")
-	}
+def selfCleanup(databaseOperations, userSecretsProvider) {
+	databaseOperations.dropDatabase()
 
 	def username = userSecretsProvider.username
-	if (userExists(adminSql, username)) {
-		dropUser(adminSql, username, logger)
-	} else {
-		logger.info("User $username doesn't exist. Nothing left to do")
-	}
-}
-
-def databaseExists(adminSql, dbName) {
-	def row = adminSql.firstRow("""
-	SELECT SCHEMA_NAME as schemaName FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = $dbName
-"""
-	)
-	return (row?.schemaName == dbName)
-}
-
-def userExists(adminSql, username) {
-	def row = adminSql.firstRow("""
-	SELECT * FROM mysql.user WHERE user = $username
-""")
-	return (row?.user == username)
-}
-
-def createDatabase(dbName, adminSql, userSecretsProvider, logger) {
-	adminSql.executeUpdate("CREATE DATABASE " + dbName)
-	adminSql.executeUpdate("GRANT USAGE ON *.* TO $userSecretsProvider.username@localhost IDENTIFIED BY $userSecretsProvider.password")
-	adminSql.executeUpdate("GRANT ALL PRIVILEGES ON " + dbName + ".* TO $userSecretsProvider.username@localhost")
-	adminSql.executeUpdate("FLUSH PRIVILEGES")
-	logger.info("SUCCESS: create database $dbName")
-}
-
-def dropDatabase(dbName, adminSql, logger) {
-	adminSql.executeUpdate("DROP DATABASE " + dbName)
-	logger.info("SUCCESS: dropped database $dbName")
-}
-
-def dropUser(adminSql, username, logger) {
-	adminSql.executeUpdate("DROP USER $username@localhost")
-	logger.info("SUCCESS: dropped user $username")
+	databaseOperations.dropUser(username)
 }
 
 def createTable(Sql sql, def logger) {
@@ -169,7 +126,7 @@ private testCreateUser(parameters, sql, logger) {
 	assertUserWasCreated(sql, parameters.firstName, parameters.lastName)
 }
 
-private Result executeSqlCommand(commandString, action, int expectedUpdateCount, Sql sql, logger) {
+private Result executeSqlCommand(String commandString, String action, int expectedUpdateCount, Sql sql, logger) {
 	def result
 	try {
 		sql.execute(commandString)
@@ -254,4 +211,66 @@ class MySqlBuilder {
 		return this.dbName ? "$baseUrl/${this.dbName}" : baseUrl
 	}
 
+}
+
+class DatabaseOperations {
+	private adminSql
+	private dbName
+	private logger
+
+	def createDatabase() {
+		if (!databaseExists()) {
+			adminSql.executeUpdate("CREATE DATABASE " + this.dbName)
+			logger.info("SUCCESS: create database ${this.dbName}")
+		} else {
+			logger.info("Nothing to setup for database $dbName")
+		}
+	}
+
+	def databaseExists() {
+		def row = adminSql.firstRow("""
+	SELECT SCHEMA_NAME as schemaName FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = $this.dbName
+"""
+		)
+		return (row?.schemaName == dbName)
+	}
+
+	def dropDatabase() {
+		if (databaseOperations.databaseExists()) {
+			adminSql.executeUpdate("DROP DATABASE " + dbName)
+			logger.info("SUCCESS: dropped database $dbName")
+		} else {
+			logger.info("Database $dbName doesn't exist")
+		}
+	}
+
+	def userExists(username) {
+		def row = adminSql.firstRow("""
+	SELECT * FROM mysql.user WHERE user = $username
+""")
+		return (row?.user == username)
+	}
+
+	def createUser(userSecretsProvider) {
+		def username = userSecretsProvider.username
+		def password = userSecretsProvider.password
+
+		if (!userExists(username)) {
+			adminSql.executeUpdate("GRANT USAGE ON *.* TO " + username + "@localhost IDENTIFIED BY $password")
+			adminSql.executeUpdate("GRANT ALL PRIVILEGES ON " + dbName + ".* TO $username@localhost")
+			adminSql.executeUpdate("FLUSH PRIVILEGES")
+			logger.info("SUCCESS: created user $username")
+		} else {
+			logger.info("Nothing to setup for user $username")
+		}
+	}
+
+	def dropUser(username) {
+		if (userExists(username)) {
+			this.adminSql.executeUpdate("DROP USER $username@localhost")
+			this.logger.info("SUCCESS: dropped user $username")
+		} else {
+			logger.info("User $username doesn't exist. Nothing left to do")
+		}
+	}
 }
