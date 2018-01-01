@@ -1,25 +1,29 @@
 class Command {
 	def logger
-	def sql
+	def sqlProvider
 
 	Result executeSqlCommand(commandString, actionName, expectedUpdateCount) {
-		def result
-		try {
-			sql.execute(commandString)
-			sql.commit()
-
-			def actualUpdateCount = sql.updateCount
-			if (expectedUpdateCount == actualUpdateCount) {
-				result = Result.success(actionName)
-			} else {
-				result = Result.wrongUpdateCount(actionName, expectedUpdateCount, actualUpdateCount)
-			}
-		} catch (Exception ex) {
-			sql.rollback()
-			result = Result.fromException(ex, actionName)
-		}
+		Result result = tryCatchAll(
+				{ doExecute(commandString, expectedUpdateCount, actionName) },
+				{ ex -> Result.fromException(ex, actionName) }
+		)
 		result.log(logger)
 		return result
 	}
 
+	private Result doExecute(commandString, expectedUpdateCount, actionName) {
+		sqlProvider.execute(commandString)
+
+		return (expectedUpdateCount == sqlProvider.updateCount) ?
+				Result.success(actionName) :
+				Result.wrongUpdateCount(actionName, expectedUpdateCount, sqlProvider.updateCount)
+	}
+
+	private tryCatchAll(Closure action, Closure exceptionReaction) {
+		try {
+			action()
+		} catch (Exception ex) {
+			exceptionReaction(ex)
+		}
+	}
 }

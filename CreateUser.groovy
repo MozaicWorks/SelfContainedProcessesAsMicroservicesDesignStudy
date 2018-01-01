@@ -21,27 +21,23 @@ def lastName = "B"
 
 CreateUserParameters createUserParameters = new CreateUserParameters(firstName: firstName, lastName: lastName)
 
-def adminSqlBuilder = new MySqlBuilder(secretsProvider: adminSecretsProvider)
-Sql adminSql = adminSqlBuilder.getSql()
+def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
+DatabaseOperations databaseOperations = new DatabaseOperations(
+		adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
+)
+def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: normalUserSecretsProvider)
 
-def normalUserSqlBuilder = new MySqlBuilder(dbName: dbName, secretsProvider: normalUserSecretsProvider)
-
-DatabaseOperations databaseOperations = new DatabaseOperations(adminSql: adminSql, dbName: dbName, logger: logger)
 selfSetup(databaseOperations, normalUserSecretsProvider, logger)
-
-Sql normalUserSql = normalUserSqlBuilder.getSql()
-selfTest(normalUserSql, logger)
+selfTest(normalUserSqlProvider, logger)
 
 createUser(
 		createUserParameters,
-		new Command(sql: normalUserSql, logger: logger),
+		new Command(sqlProvider: normalUserSqlProvider, logger: logger),
 		logger
 )
 
 selfCleanup(databaseOperations, normalUserSecretsProvider, logger)
 
-adminSql.close()
-normalUserSql.close()
 
 static def createUser(CreateUserParameters parameters, Command command, logger) {
 	logger.info("Creating user $parameters")
@@ -61,19 +57,19 @@ static def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider,
 	databaseOperations.createDatabase()
 	databaseOperations.createUser(userSecretsProvider)
 
-	MySqlBuilder userSqlBuilder = new MySqlBuilder(
+	MySqlProvider userSqlProvider = new MySqlProvider(
 			dbName: databaseOperations.dbName,
 			secretsProvider: userSecretsProvider,
 	)
 
-	def command = new Command(sql: userSqlBuilder.getSql(), logger: logger)
+	def command = new Command(sqlProvider: userSqlProvider, logger: logger)
 	createTable(command, logger)
 
 	logger.info("END self setup")
 }
 
-static def existsTable(sql) {
-	def rows = sql.firstRow(
+static def existsTable(sqlProvider) {
+	def rows = sqlProvider.firstRow(
 			"""
 	SHOW TABLES LIKE 'USER';
 """)
@@ -91,7 +87,7 @@ static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvide
 }
 
 static def createTable(command, logger) {
-	if (!existsTable(command.sql)) {
+	if (!existsTable(command.sqlProvider)) {
 		command.executeSqlCommand(
 				"""CREATE TABLE `USER`(
 		                `ID` INT(11) NOT NULL AUTO_INCREMENT,
@@ -106,12 +102,12 @@ static def createTable(command, logger) {
 	}
 }
 
-static def selfTest(sql, logger) {
+static def selfTest(sqlProvider, logger) {
 	logger.info("START SELF-TEST")
 	def firstName = RandomStringUtils.randomAlphabetic(100)
 	def lastName = RandomStringUtils.randomAlphabetic(100)
 	def parameters = new CreateUserParameters(firstName: firstName, lastName: lastName, isActive: false)
-	def command = new Command(logger: logger, sql: sql)
+	def command = new Command(logger: logger, sqlProvider: sqlProvider)
 
 	try {
 		testCreateUser(parameters, command, logger)
@@ -139,8 +135,8 @@ private static deleteTestUser(CreateUserParameters parameters, Command command) 
 	return command.executeSqlCommand(commandString, "deleteTestUser", 1)
 }
 
-private static assertUserWasCreated(sql, firstName, lastName) {
-	def rows = sql.firstRow(
+private static assertUserWasCreated(sqlProvider, firstName, lastName) {
+	def rows = sqlProvider.firstRow(
 			"""
 		SELECT COUNT(ID) AS count FROM USER WHERE FIRST_NAME=${firstName} AND LAST_NAME=${lastName}
 """)
@@ -151,7 +147,7 @@ private static testCreateUser(CreateUserParameters parameters, Command command, 
 	def result = createUser(parameters, command, logger)
 
 	assert result.isSuccessful(), "Could not create a user with $parameters"
-	assertUserWasCreated(command.sql, parameters.firstName, parameters.lastName)
+	assertUserWasCreated(command.sqlProvider, parameters.firstName, parameters.lastName)
 }
 
 @ToString(includePackage = false, includeFields = true, includeNames = true)
