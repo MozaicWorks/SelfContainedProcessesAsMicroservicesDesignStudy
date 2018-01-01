@@ -12,8 +12,8 @@ import java.util.logging.SimpleFormatter
 Logger logger = Logger.getLogger("CreateUser")
 logger.info("START CreateUser")
 
-def normalUserSecretsProvider = [username: "user", password: "password"]
-def adminSecretsProvider = [username: "root", password: ""]
+def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
+def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("adminSecrets.groovy").toURL())
 def dbName = "Users"
 
 def firstName = "A"
@@ -162,3 +162,19 @@ class CreateUserParameters {
 }
 
 logger.info("END CreateUser")
+
+
+class UserSecretsProviderFromConfigFile {
+	def config = new ConfigSlurper()
+	URL fileLocation
+
+	def getUsername() {
+		def secrets = config.parse(fileLocation)
+		return secrets.username
+	}
+
+	def getPassword() {
+		def secrets = config.parse(fileLocation)
+		return secrets.password
+	}
+}

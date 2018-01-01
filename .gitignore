@@ -3,3 +3,5 @@
 .gradle
 build
 createDb.groovy
+adminSecrets.groovy
+user.groovy
