@@ -7,6 +7,10 @@ import groovy.transform.ToString
 import org.apache.commons.lang3.RandomStringUtils
 
 import java.util.logging.Logger
+import java.util.logging.SimpleFormatter
+
+Logger logger = Logger.getLogger("CreateUser")
+logger.info("START CreateUser")
 
 def normalUserSecretsProvider = [username: "user", password: "password"]
 def adminSecretsProvider = [username: "root", password: ""]
@@ -16,16 +20,11 @@ def firstName = "A"
 def lastName = "B"
 
 CreateUserParameters createUserParameters = new CreateUserParameters(firstName: firstName, lastName: lastName)
-Logger logger = Logger.getLogger("CreateUser")
 
-Sql adminSql = new MySqlBuilder(
-		secretsProvider: adminSecretsProvider
-).getSql()
+def adminSqlBuilder = new MySqlBuilder(secretsProvider: adminSecretsProvider)
+Sql adminSql = adminSqlBuilder.getSql()
 
-MySqlBuilder normalUserSqlBuilder = new MySqlBuilder(
-		dbName: dbName,
-		secretsProvider: normalUserSecretsProvider
-)
+def normalUserSqlBuilder = new MySqlBuilder(dbName: dbName, secretsProvider: normalUserSecretsProvider)
 
 DatabaseOperations databaseOperations = new DatabaseOperations(adminSql: adminSql, dbName: dbName, logger: logger)
 selfSetup(databaseOperations, normalUserSecretsProvider, logger)
@@ -33,28 +32,32 @@ selfSetup(databaseOperations, normalUserSecretsProvider, logger)
 Sql normalUserSql = normalUserSqlBuilder.getSql()
 selfTest(normalUserSql, logger)
 
-def result = createUser(createUserParameters, normalUserSql, logger)
-result.log(logger)
+createUser(
+		createUserParameters,
+		new Command(sql: normalUserSql, logger: logger),
+		logger
+)
 
-selfCleanup(databaseOperations, normalUserSecretsProvider)
+selfCleanup(databaseOperations, normalUserSecretsProvider, logger)
 
 adminSql.close()
 normalUserSql.close()
 
-static def createUser(CreateUserParameters parameters, Sql sql, def logger) {
+static def createUser(CreateUserParameters parameters, Command command, logger) {
 	logger.info("Creating user $parameters")
-	def firstName = parameters.firstName
-	def lastName = parameters.lastName
 	def isActive = parameters.formatIsActiveForDb()
 
-	GString commandString = """ 
+	return command.executeSqlCommand(
+			"""\
 		INSERT INTO USER(FIRST_NAME, LAST_NAME, IS_ACTIVE) 
-        VALUES($firstName, $lastName, $isActive)
-"""
-	return new Command().executeSqlCommand(commandString, "createUser", 1, sql, logger)
+		VALUES($parameters.firstName, $parameters.lastName, $isActive)
+		""",
+			"createUser", 1
+	)
 }
 
 static def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
+	logger.info("START self setup")
 	databaseOperations.createDatabase()
 	databaseOperations.createUser(userSecretsProvider)
 
@@ -63,7 +66,10 @@ static def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider,
 			secretsProvider: userSecretsProvider,
 	)
 
-	createTable(userSqlBuilder.getSql(), logger)
+	def command = new Command(sql: userSqlBuilder.getSql(), logger: logger)
+	createTable(command, logger)
+
+	logger.info("END self setup")
 }
 
 static def existsTable(sql) {
@@ -71,30 +77,30 @@ static def existsTable(sql) {
 			"""
 	SHOW TABLES LIKE 'USER';
 """)
-	return (rows?.count == 1)
+	return (rows?.size() == 1)
 }
 
-static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvider) {
+static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
+	logger.info("START self cleanup")
 	databaseOperations.dropDatabase()
 
 	def username = userSecretsProvider.username
 	databaseOperations.dropUser(username)
+
+	logger.info("END self cleanup")
 }
 
-static def createTable(Sql sql, def logger) {
-	if (!existsTable(sql)) {
-		def commandString = """
-			CREATE TABLE `USER`(
-                `ID` INT(11) NOT NULL AUTO_INCREMENT,
-                `FIRST_NAME` VARCHAR(500) NOT NULL,
-                `LAST_NAME` VARCHAR(500) NOT NULL,
-                `IS_ACTIVE` BOOLEAN NOT NULL,
-                PRIMARY KEY(`ID`)
-                )
-    """
-
-		def result = new Command().executeSqlCommand(commandString, "createTableUser", 1, sql, logger)
-		result.log(logger)
+static def createTable(command, logger) {
+	if (!existsTable(command.sql)) {
+		command.executeSqlCommand(
+				"""CREATE TABLE `USER`(
+		                `ID` INT(11) NOT NULL AUTO_INCREMENT,
+		                `FIRST_NAME` VARCHAR(500) NOT NULL,
+		                `LAST_NAME` VARCHAR(500) NOT NULL,
+		                `IS_ACTIVE` BOOLEAN NOT NULL,
+		                PRIMARY KEY(`ID`)
+		        )""", "createTableUser", 1
+		)
 	} else {
 		logger.info("Table USER exists; nothing to do")
 	}
@@ -105,12 +111,13 @@ static def selfTest(sql, logger) {
 	def firstName = RandomStringUtils.randomAlphabetic(100)
 	def lastName = RandomStringUtils.randomAlphabetic(100)
 	def parameters = new CreateUserParameters(firstName: firstName, lastName: lastName, isActive: false)
+	def command = new Command(logger: logger, sql: sql)
 
 	try {
-		testCreateUser(parameters, sql, logger)
+		testCreateUser(parameters, command, logger)
 		logger.info("Self test successful")
 	} finally {
-		def result = deleteTestUser(parameters, sql, logger)
+		def result = deleteTestUser(parameters, command)
 		if (result.isSuccessful()) {
 			logger.info("Clean up successful")
 		} else {
@@ -120,7 +127,7 @@ static def selfTest(sql, logger) {
 	logger.info("END SELF-TEST")
 }
 
-private static deleteTestUser(CreateUserParameters parameters, sql, logger) {
+private static deleteTestUser(CreateUserParameters parameters, Command command) {
 	def firstName = parameters.firstName
 	def lastName = parameters.lastName
 	def commandString = """
@@ -129,7 +136,7 @@ private static deleteTestUser(CreateUserParameters parameters, sql, logger) {
 		AND LAST_NAME=$lastName 
 		AND NOT IS_ACTIVE
 """
-	return new Command().executeSqlCommand(commandString, "deleteTestUser", 1, sql, logger)
+	return command.executeSqlCommand(commandString, "deleteTestUser", 1)
 }
 
 private static assertUserWasCreated(sql, firstName, lastName) {
@@ -140,11 +147,11 @@ private static assertUserWasCreated(sql, firstName, lastName) {
 	assert rows.count == 1, "Cannot retrieve the created user"
 }
 
-private static testCreateUser(CreateUserParameters parameters, Sql sql, logger) {
-	def result = createUser(parameters, sql, logger)
+private static testCreateUser(CreateUserParameters parameters, Command command, logger) {
+	def result = createUser(parameters, command, logger)
 
 	assert result.isSuccessful(), "Could not create a user with $parameters"
-	assertUserWasCreated(sql, parameters.firstName, parameters.lastName)
+	assertUserWasCreated(command.sql, parameters.firstName, parameters.lastName)
 }
 
 @ToString(includePackage = false, includeFields = true, includeNames = true)
@@ -157,3 +164,5 @@ class CreateUserParameters {
 		return isActive ? 1 : 0
 	}
 }
+
+logger.info("END CreateUser")

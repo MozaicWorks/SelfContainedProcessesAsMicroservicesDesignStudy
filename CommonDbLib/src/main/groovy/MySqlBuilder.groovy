@@ -5,6 +5,7 @@ class MySqlBuilder {
 	String dbName
 	def secretsProvider
 	String driver = "com.mysql.jdbc.Driver"
+	String parameters = "useSSL=false"
 
 	Sql getSql() {
 		def sql = Sql.newInstance(
@@ -18,7 +19,7 @@ class MySqlBuilder {
 	}
 
 	def dbUrl() {
-		return this.dbName ? "$baseUrl/${this.dbName}" : baseUrl
+		return dbName ? "$baseUrl/$dbName?$parameters" : "$baseUrl?$parameters"
 	}
 
 }

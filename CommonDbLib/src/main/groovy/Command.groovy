@@ -1,7 +1,8 @@
-import groovy.sql.Sql
-
 class Command {
-	Result executeSqlCommand(def commandString, String actionName, int expectedUpdateCount, Sql sql, logger) {
+	def logger
+	def sql
+
+	Result executeSqlCommand(commandString, actionName, expectedUpdateCount) {
 		def result
 		try {
 			sql.execute(commandString)
