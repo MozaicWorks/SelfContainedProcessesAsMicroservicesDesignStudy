@@ -13,7 +13,6 @@ import grails.persistence.*
 import org.apache.commons.lang3.RandomStringUtils
 import org.grails.datastore.gorm.GormEntity
 import org.grails.orm.hibernate.HibernateDatastore
-import grails.gorm.annotation.Entity
 
 def logger = new MyLogger()
 logger.info("START CreateUser")
