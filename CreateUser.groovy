@@ -16,24 +16,27 @@ logger.info("START CreateUser")
 
 def dbName = "Users"
 
-def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup]')
+def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup|daemon]')
 cli.with {
 	help longOpt: 'help', 'show usage information'
 	create longOpt: 'create', 'creates a user'
 	selfSetup longOpt: 'self setup', 'creates database and user'
 	selfTest longOpt: 'self test', 'runs self test'
 	selfCleanup longOpt: 'self cleanup', 'drops database and user'
+	daemon longOpt: 'run as a daemon', "runs the program in interactive mode. Same options can be passed"
 
 	// need a self backup
 }
 
 def options = cli.parse(args)
 if (!options) {
+	println "no args"
 	cli.usage()
 	throw new RuntimeException("Pass the correct arguments")
 }
 
-if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest) {
+if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest && !options.daemon) {
+	println "bad args"
 	cli.usage()
 	throw new RuntimeException("Pass the correct arguments")
 }
@@ -60,6 +63,10 @@ if (options.selfTest) {
 }
 
 if (options.create) {
+	createCommand(dbName, logger)
+}
+
+private createCommand(String dbName, MyLogger logger) {
 	final long startTime = System.currentTimeMillis()
 	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
 	System.err.println "got user secrets: " + (System.currentTimeMillis() - startTime)
@@ -92,6 +99,27 @@ if (options.selfCleanup) {
 	)
 
 	doSelfCleanup(databaseOperations, normalUserSecretsProvider, logger)
+}
+
+if (options.daemon) {
+	def exit = false
+	def input = System.in
+	def reader = input.newReader()
+	def output = System.out
+	while (!exit) {
+		def line = reader.readLine()
+
+		if (line == "create") {
+			createCommand(dbName, logger)
+			output.write("OK\n".getBytes())
+		}
+
+		if (line == "exit") {
+			exit = true
+		}
+	}
+
+	reader.close()
 }
 
 static def createUser(CreateUserParameters parameters, Command command, logger) {

@@ -3,60 +3,89 @@
 import static groovyx.gpars.GParsPool.*
 import org.apache.commons.lang3.RandomStringUtils
 
-def executablePath = './CreateUser.groovy -create'
+runProcess('./CreateUser.groovy -daemon', 100)
 
-//withPool {
-//	def times = (1..1).collectParallel {
-		def result = runProcess(executablePath)
-		println "exit value: $result.exitValue"
-		println "out >"
-		println result.output
-		println "err >"
-		println result.error
-		println "Duration: ${result.duration}"
-//	}
-
-//	println "SLOWEST: " + times.max()
-//	println "FASTEST: " + times.min()
-//	println "AVERAGE: " + times.sum() / times.size()
-//}
-
-private runProcess(executablePath) {
-	final long startTime = System.currentTimeMillis()
-	def sout = new StringBuilder(), serr = new StringBuilder()
+private runProcess(executablePath, numberOfCreates) {
+	def logger = new MyLogger()
+	def serr = new StringBuilder()
 	Process proc = executablePath.execute()
-	println "After execute: " + (System.currentTimeMillis() - startTime)
-	proc.in.withReader { reader ->
-		def line = reader.readLine()
-		if (line == "First name:") {
-			println "Read first name: " + (System.currentTimeMillis() - startTime)
-			def firstName = RandomStringUtils.randomAlphabetic(100)
-			proc.outputStream.write("$firstName\n".getBytes())
-			proc.outputStream.flush()
-			println "Wrote first name: " + (System.currentTimeMillis() - startTime)
-		}
 
-		line = reader.readLine()
-		if (line == "Last name:") {
-			println "Read last name: " + (System.currentTimeMillis() - startTime)
-			def lastName = RandomStringUtils.randomAlphabetic(100)
-			proc.outputStream.write("$lastName\n".getBytes())
-			proc.outputStream.flush()
-			println "Wrote last name: " + (System.currentTimeMillis() - startTime)
+	try {
+		def outputStream = proc.outputStream
+		def reader = proc.in.newReader()
+
+		def times = (1..numberOfCreates).collect {
+			create(outputStream, reader, logger)
 		}
+		println "MIN: ${times.min()}"
+		println "MAX: ${times.max()}"
+		println "AVERAGE: ${times.sum() / times.size()}"
+
+	}
+	finally {
+		proc.consumeProcessErrorStream(serr)
+		sendString(outputStream, "exit", logger)
+		reader.close()
+		proc.outputStream.flush()
+		proc.waitFor()
 	}
 
-	proc.consumeProcessErrorStream(serr)
-	println "Waiting for process to stop: " + (System.currentTimeMillis() - startTime)
-	proc.waitFor()
-	println "Done: " + (System.currentTimeMillis() - startTime)
+}
 
-	final long endTime = System.currentTimeMillis()
-
-	return [
-			output   : sout.toString(),
-			error    : serr.toString(),
-			exitValue: proc.exitValue(),
-			duration: endTime - startTime
+private create(outputStream, inputReader, logger) {
+	def command = [
+			name: "create",
+			args: [
+					[
+							line : "First name:",
+							value: RandomStringUtils.randomAlphabetic(100)
+					],
+					[
+							line : "Last name:",
+							value: RandomStringUtils.randomAlphabetic(100)
+					]
+			]
 	]
+
+	return executeCommand(outputStream, command, logger, inputReader)
+}
+
+private executeCommand(outputStream, command, logger, inputReader) {
+	final long startTime = System.currentTimeMillis()
+	sendString(outputStream, command.name, logger)
+	command.args.each { arg ->
+		doArgument(inputReader, outputStream, arg.line, arg.value, logger)
+	}
+	doOK(inputReader)
+	def finalTime = System.currentTimeMillis() - startTime
+	println "DONE: " + finalTime
+	return finalTime
+}
+
+private doOK(inputReader) {
+	line = inputReader.readLine()
+	if (line == "OK") println "OK"
+}
+
+private doArgument(reader, outputStream, argumentLine, argumentValue, logger) {
+	def line = reader.readLine()
+	if (line == argumentLine) {
+		sendString(outputStream, argumentValue, logger)
+		logger.info("Sent $argumentLine $argumentValue")
+	}
+}
+
+private doLastName(reader, outputStream, lastName, MyLogger logger) {
+	doArgument(reader, outputStream, "Last name:", lastName, logger)
+}
+
+private sendString(stream, String theString, logger) {
+	stream.write((theString + "\n").getBytes())
+	stream.flush()
+}
+
+class MyLogger {
+	def info(message) {
+		println message
+	}
 }
