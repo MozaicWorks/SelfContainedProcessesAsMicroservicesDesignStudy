@@ -1,3 +1,5 @@
+#!/usr/bin/env groovy
+
 @Grab("mysql:mysql-connector-java:5.1.39")
 @Grab("org.apache.commons:commons-lang3:3.7")
 @GrabConfig(systemClassLoader = true)
@@ -9,35 +11,88 @@ import org.apache.commons.lang3.RandomStringUtils
 import java.util.logging.Logger
 import java.util.logging.SimpleFormatter
 
-Logger logger = Logger.getLogger("CreateUser")
+def logger = new MyLogger()
 logger.info("START CreateUser")
 
-def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
-def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("adminSecrets.groovy").toURL())
 def dbName = "Users"
 
-def firstName = "A"
-def lastName = "B"
+def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup]')
+cli.with {
+	help longOpt: 'help', 'show usage information'
+	create longOpt: 'create', 'creates a user'
+	selfSetup longOpt: 'self setup', 'creates database and user'
+	selfTest longOpt: 'self test', 'runs self test'
+	selfCleanup longOpt: 'self cleanup', 'drops database and user'
 
-CreateUserParameters createUserParameters = new CreateUserParameters(firstName: firstName, lastName: lastName)
+	// need a self backup
+}
 
-def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
-DatabaseOperations databaseOperations = new DatabaseOperations(
-		adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
-)
-def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: normalUserSecretsProvider)
+def options = cli.parse(args)
+if (!options) {
+	cli.usage()
+	throw new RuntimeException("Pass the correct arguments")
+}
 
-selfSetup(databaseOperations, normalUserSecretsProvider, logger)
-selfTest(normalUserSqlProvider, logger)
+if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest) {
+	cli.usage()
+	throw new RuntimeException("Pass the correct arguments")
+}
 
-createUser(
-		createUserParameters,
-		new Command(sqlProvider: normalUserSqlProvider, logger: logger),
-		logger
-)
+if (options.help) {
+	cli.usage()
+	return
+}
 
-selfCleanup(databaseOperations, normalUserSecretsProvider, logger)
+if (options.selfSetup) {
+	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
+	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("adminSecrets.groovy").toURL())
+	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
+	DatabaseOperations databaseOperations = new DatabaseOperations(
+			adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
+	)
+	doSelfSetup(databaseOperations, normalUserSecretsProvider, logger)
+}
 
+if (options.selfTest) {
+	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
+	def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: normalUserSecretsProvider)
+	doSelfTest(normalUserSqlProvider, logger)
+}
+
+if (options.create) {
+	final long startTime = System.currentTimeMillis()
+	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
+	System.err.println "got user secrets: " + (System.currentTimeMillis() - startTime)
+	def scanner = new Scanner(System.in)
+	println("First name:")
+	System.err.println "wait first name: " + (System.currentTimeMillis() - startTime)
+	def firstName = scanner.nextLine()
+	System.err.println "got first name: " + (System.currentTimeMillis() - startTime)
+	println("Last name:")
+	System.err.println "wait last name: " + (System.currentTimeMillis() - startTime)
+	def lastName = scanner.nextLine()
+	System.err.println "got last name: " + (System.currentTimeMillis() - startTime)
+	CreateUserParameters createUserParameters = new CreateUserParameters(firstName: firstName, lastName: lastName)
+	def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: normalUserSecretsProvider)
+	System.err.println "start create user: " + (System.currentTimeMillis() - startTime)
+	createUser(
+			createUserParameters,
+			new Command(sqlProvider: normalUserSqlProvider, logger: logger),
+			logger
+	)
+	System.err.println "done create user: " + (System.currentTimeMillis() - startTime)
+}
+
+if (options.selfCleanup) {
+	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("user.groovy").toURL())
+	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File("adminSecrets.groovy").toURL())
+	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
+	DatabaseOperations databaseOperations = new DatabaseOperations(
+			adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
+	)
+
+	doSelfCleanup(databaseOperations, normalUserSecretsProvider, logger)
+}
 
 static def createUser(CreateUserParameters parameters, Command command, logger) {
 	logger.info("Creating user $parameters")
@@ -52,7 +107,7 @@ static def createUser(CreateUserParameters parameters, Command command, logger) 
 	)
 }
 
-static def selfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
+static def doSelfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
 	logger.info("START self setup")
 	databaseOperations.createDatabase()
 	databaseOperations.createUser(userSecretsProvider)
@@ -76,7 +131,7 @@ static def existsTable(sqlProvider) {
 	return (rows?.size() == 1)
 }
 
-static def selfCleanup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
+static def doSelfCleanup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
 	logger.info("START self cleanup")
 	databaseOperations.dropDatabase()
 
@@ -102,7 +157,7 @@ static def createTable(command, logger) {
 	}
 }
 
-static def selfTest(sqlProvider, logger) {
+static def doSelfTest(sqlProvider, logger) {
 	logger.info("START SELF-TEST")
 	def firstName = RandomStringUtils.randomAlphabetic(100)
 	def lastName = RandomStringUtils.randomAlphabetic(100)
@@ -111,7 +166,7 @@ static def selfTest(sqlProvider, logger) {
 
 	try {
 		testCreateUser(parameters, command, logger)
-		logger.info("Self test successful")
+		logger.info("SUCCESS SELF-TEST")
 	} finally {
 		def result = deleteTestUser(parameters, command)
 		if (result.isSuccessful()) {
@@ -176,5 +231,22 @@ class UserSecretsProviderFromConfigFile {
 	def getPassword() {
 		def secrets = config.parse(fileLocation)
 		return secrets.password
+	}
+}
+
+class MyLogger {
+
+	def info(message) {
+		log("INFO", message)
+	}
+
+	def severe(message) {
+		log("SEVERE", message)
+	}
+
+	private log(prefix, message) {
+		def date = new Date().format("DD/MM/YYYY HH:mm:ss")
+
+		System.err.println "$date $prefix: $message"
 	}
 }
