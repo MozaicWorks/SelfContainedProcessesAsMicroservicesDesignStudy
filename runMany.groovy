@@ -16,6 +16,8 @@ withPool {
 	println "MIN: ${times.min()}"
 	println "MAX: ${times.max()}"
 	println "AVERAGE: ${times.sum() / times.size()}"
+
+	println "All times: ${times.join(', ')}"
 }
 
 private runProcess(executablePath, numberOfCreates) {
@@ -37,11 +39,11 @@ private runProcess(executablePath, numberOfCreates) {
 private create(outputStream, inputReader, logger) {
 	def args = [
 			[
-					line : "First name:",
+					line : "First Name:",
 					value: RandomStringUtils.randomAlphabetic(100)
 			],
 			[
-					line : "Last name:",
+					line : "Last Name:",
 					value: RandomStringUtils.randomAlphabetic(100)
 			]
 	]
@@ -69,10 +71,6 @@ private doArgument(reader, outputStream, argumentLine, argumentValue, logger) {
 		sendString(outputStream, argumentValue)
 		logger.info("Sent $argumentLine $argumentValue")
 	}
-}
-
-private doLastName(reader, outputStream, lastName, MyLogger logger) {
-	doArgument(reader, outputStream, "Last name:", lastName, logger)
 }
 
 private sendString(stream, theString) {

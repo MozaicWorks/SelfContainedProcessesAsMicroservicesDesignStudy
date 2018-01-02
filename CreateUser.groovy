@@ -1,16 +1,19 @@
-#!/usr/bin/env groovy
+#!/usr/bin/env groovyclient
 
-@Grab("org.codehaus.gpars:gpars:1.2.0")
-@Grab("mysql:mysql-connector-java:5.1.39")
-@Grab("org.apache.commons:commons-lang3:3.7")
-@GrabConfig(systemClassLoader = true)
+@Grapes([
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@Grab("org.apache.commons:commons-lang3:3.7"),
+		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@GrabConfig(systemClassLoader = true)
+])
 
-import groovy.sql.Sql
-import groovy.transform.ToString
+import grails.gorm.annotation.Entity
+import grails.persistence.*
 import org.apache.commons.lang3.RandomStringUtils
-import java.util.logging.Logger
-import java.util.logging.SimpleFormatter
-import groovyx.gpars.GParsExecutorsPool
+import org.grails.datastore.gorm.GormEntity
+import org.grails.orm.hibernate.HibernateDatastore
+import grails.gorm.annotation.Entity
 
 def logger = new MyLogger()
 logger.info("START CreateUser")
@@ -60,8 +63,19 @@ if (options.help) {
 	return
 }
 
+def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
+
+Map configuration = [
+		'hibernate.hbm2ddl.auto': '',
+		'dataSource.url'        : "jdbc:mysql://localhost:3306/$dbName?useSSL=false",
+		'dataSource.username'   : normalUserSecretsProvider.username,
+		'dataSource.password'   : normalUserSecretsProvider.password,
+		'hibernate.dialect'     : 'org.hibernate.dialect.MySQLDialect'
+]
+// need this for GORM mapping
+HibernateDatastore datastore = new HibernateDatastore(configuration, User)
+
 if (options.selfSetup) {
-	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
 	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(adminSecretsFilename).toURL())
 	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
 	DatabaseOperations databaseOperations = new DatabaseOperations(
@@ -72,35 +86,15 @@ if (options.selfSetup) {
 }
 
 if (options.selfTest) {
-	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
-	def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: normalUserSecretsProvider)
-
-	doSelfTest(normalUserSqlProvider, logger)
+	doSelfTest(logger)
 }
 
 if (options.create) {
-	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
-
-	doCreate(normalUserSecretsProvider, dbName, logger)
-}
-
-private static doCreate(userSecretsProvider, String dbName, MyLogger logger) {
-	def scanner = new Scanner(System.in)
-	println("First name:")
-	def firstName = scanner.nextLine()
-	println("Last name:")
-	def lastName = scanner.nextLine()
-	CreateUserParameters createUserParameters = new CreateUserParameters(firstName: firstName, lastName: lastName)
-	def normalUserSqlProvider = new MySqlProvider(dbName: dbName, secretsProvider: userSecretsProvider)
-	createUser(
-			createUserParameters,
-			new Command(sqlProvider: normalUserSqlProvider, logger: logger),
-			logger
-	)
+	doCreate(logger)
+	resultOK()
 }
 
 if (options.selfCleanup) {
-	def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
 	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(adminSecretsFilename).toURL())
 	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
 	DatabaseOperations databaseOperations = new DatabaseOperations(
@@ -110,17 +104,26 @@ if (options.selfCleanup) {
 	doSelfCleanup(databaseOperations, normalUserSecretsProvider, logger)
 }
 
-static def createUser(CreateUserParameters parameters, Command command, logger) {
-	logger.info("Creating user $parameters")
-	def isActive = parameters.formatIsActiveForDb()
+private static doCreate(logger) {
+	def scanner = new Scanner(System.in)
 
-	return command.executeSqlCommand(
-			"""\
-		INSERT INTO USER(FIRST_NAME, LAST_NAME, IS_ACTIVE) 
-		VALUES($parameters.firstName, $parameters.lastName, $isActive)
-		""",
-			"createUser", 1
-	)
+	def commandUser = new CommandLineUserMapping()
+	def parameters = commandUser.mapping.collectEntries { columnName, labelName ->
+		println labelName
+		def value = scanner.nextLine()
+		return ["$columnName": value]
+	}
+
+	createUser(parameters, logger)
+}
+
+static def createUser(parameters, logger) {
+	logger.info("Creating user $parameters")
+
+	User.withTransaction {
+		def result = new User(parameters).save()
+		return result != null
+	}
 }
 
 static def doSelfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
@@ -172,63 +175,44 @@ static def createTable(command, logger) {
 	}
 }
 
-static def doSelfTest(sqlProvider, logger) {
+static def doSelfTest(logger) {
 	logger.info("START SELF-TEST")
 	def firstName = RandomStringUtils.randomAlphabetic(100)
 	def lastName = RandomStringUtils.randomAlphabetic(100)
-	def parameters = new CreateUserParameters(firstName: firstName, lastName: lastName, isActive: false)
-	def command = new Command(logger: logger, sqlProvider: sqlProvider)
+	def parameters = [firstName: firstName, lastName: lastName, isActive: false]
 
 	try {
-		testCreateUser(parameters, command, logger)
+		testCreateUser(parameters, logger)
 		logger.info("SUCCESS SELF-TEST")
 	} finally {
-		def result = deleteTestUser(parameters, command)
-		if (result.isSuccessful()) {
+		try {
+			deleteTestUser(parameters)
 			logger.info("Clean up successful")
-		} else {
-			logger.severe("Clean up error. Can't recover, will stop")
+		} catch (Exception exc) {
+			logger.severe("Clean up error $exc.message. Can't recover, will stop")
 		}
 	}
 	logger.info("END SELF-TEST")
 }
 
-private static deleteTestUser(CreateUserParameters parameters, Command command) {
-	def firstName = parameters.firstName
-	def lastName = parameters.lastName
-	def commandString = """
-		DELETE FROM USER 
-		WHERE FIRST_NAME=$firstName 
-		AND LAST_NAME=$lastName 
-		AND NOT IS_ACTIVE
-"""
-	return command.executeSqlCommand(commandString, "deleteTestUser", 1)
-}
-
-private static assertUserWasCreated(sqlProvider, firstName, lastName) {
-	def rows = sqlProvider.firstRow(
-			"""
-		SELECT COUNT(ID) AS count FROM USER WHERE FIRST_NAME=${firstName} AND LAST_NAME=${lastName}
-""")
-	assert rows.count == 1, "Cannot retrieve the created user"
-}
-
-private static testCreateUser(CreateUserParameters parameters, Command command, logger) {
-	def result = createUser(parameters, command, logger)
-
-	assert result.isSuccessful(), "Could not create a user with $parameters"
-	assertUserWasCreated(command.sqlProvider, parameters.firstName, parameters.lastName)
-}
-
-@ToString(includePackage = false, includeFields = true, includeNames = true)
-class CreateUserParameters {
-	def firstName
-	def lastName
-	boolean isActive = true
-
-	def formatIsActiveForDb() {
-		return isActive ? 1 : 0
+private static deleteTestUser(parameters) {
+	User.withTransaction {
+		def user = User.findByFirstNameAndLastNameAndIsActive(parameters.firstName, parameters.lastName, false)
+		user.delete()
 	}
+}
+
+private static assertUserWasCreated(firstName, lastName) {
+	User.withTransaction {
+		assert User.findAllByFirstNameAndLastName(firstName, lastName).size() == 1
+	}
+}
+
+private static testCreateUser(parameters, logger) {
+	def result = createUser(parameters, logger)
+
+	assert result, "Could not create a user with $parameters"
+	assertUserWasCreated(parameters.firstName, parameters.lastName)
 }
 
 logger.info("END CreateUser")
@@ -250,7 +234,6 @@ class UserSecretsProviderFromConfigFile {
 }
 
 class MyLogger {
-
 	def info(message) {
 		log("INFO", message)
 	}
@@ -264,4 +247,26 @@ class MyLogger {
 
 		System.err.println "$date $prefix: $message"
 	}
+}
+
+class DomainUser {
+	String firstName
+	String lastName
+	Boolean isActive = true
+}
+
+@Entity
+class User extends DomainUser implements GormEntity<User> {
+	static mapping = {
+		table 'USER'
+		version false
+		autoTimestamp false
+	}
+}
+
+class CommandLineUserMapping{
+	static mapping = [
+			firstName: "First Name:",
+			lastName : "Last Name:"
+	]
 }
