@@ -3,22 +3,7 @@
 		@Grab("mysql:mysql-connector-java:5.1.39"),
 		@Grab("org.apache.commons:commons-lang3:3.7"),
 		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
-		@Grab("mysql:mysql-connector-java:5.1.39"),
-		@GrabConfig(systemClassLoader = true)
-])
-import grails.gorm.annotation.Entity
-@Grapes([
-		@Grab("mysql:mysql-connector-java:5.1.39"),
-		@Grab("org.apache.commons:commons-lang3:3.7"),
-		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
-		@Grab("mysql:mysql-connector-java:5.1.39"),
-		@GrabConfig(systemClassLoader = true)
-])
-import grails.gorm.annotation.Entity
-@Grapes([
-		@Grab("mysql:mysql-connector-java:5.1.39"),
-		@Grab("org.apache.commons:commons-lang3:3.7"),
-		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
+		@Grab("org.slf4j:slf4j-simple:1.7.25"),
 		@Grab("mysql:mysql-connector-java:5.1.39"),
 		@GrabConfig(systemClassLoader = true)
 ])
