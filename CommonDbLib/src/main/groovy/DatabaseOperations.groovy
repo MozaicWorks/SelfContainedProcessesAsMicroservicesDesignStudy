@@ -1,7 +1,7 @@
 class DatabaseOperations {
-	private MySqlProvider adminSqlProvider
-	private dbName
-	private logger
+	private SqlProvider adminSqlProvider
+	private String dbName
+	private MyLogger logger
 
 	def createDatabase() {
 		if (!databaseExists()) {
@@ -41,9 +41,15 @@ class DatabaseOperations {
 		def password = userSecretsProvider.password
 
 		if (!userExists(username)) {
-			adminSqlProvider.executeUpdate("GRANT USAGE ON *.* TO $username@localhost IDENTIFIED BY $password")
-			adminSqlProvider.executeUpdate("GRANT ALL PRIVILEGES ON " + dbName + ".* TO $username@localhost")
-			adminSqlProvider.executeUpdate("FLUSH PRIVILEGES")
+			adminSqlProvider.executeUpdate(
+					"GRANT USAGE ON *.* TO $username@localhost IDENTIFIED BY $password"
+			)
+			adminSqlProvider.executeUpdate(
+					"GRANT ALL PRIVILEGES ON " + dbName + ".* TO $username@localhost"
+			)
+			adminSqlProvider.executeUpdate(
+					"FLUSH PRIVILEGES"
+			)
 			logger.info("SUCCESS: created user $username")
 		} else {
 			logger.info("Nothing to setup for user $username")
@@ -52,7 +58,9 @@ class DatabaseOperations {
 
 	def dropUser(username) {
 		if (userExists(username)) {
-			this.adminSqlProvider.executeUpdate("DROP USER $username@localhost")
+			this.adminSqlProvider.executeUpdate(
+					"DROP USER $username@localhost"
+			)
 			this.logger.info("SUCCESS: dropped user $username")
 		} else {
 			logger.info("User $username doesn't exist. Nothing left to do")

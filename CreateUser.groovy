@@ -1,5 +1,12 @@
 #!/usr/bin/env groovyclient
-
+@Grapes([
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@Grab("org.apache.commons:commons-lang3:3.7"),
+		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@GrabConfig(systemClassLoader = true)
+])
+import grails.gorm.annotation.Entity
 @Grapes([
 		@Grab("mysql:mysql-connector-java:5.1.39"),
 		@Grab("org.apache.commons:commons-lang3:3.7"),
@@ -14,12 +21,48 @@ import org.apache.commons.lang3.RandomStringUtils
 import org.grails.datastore.gorm.GormEntity
 import org.grails.orm.hibernate.HibernateDatastore
 
-def logger = new MyLogger()
-logger.info("START CreateUser")
+final String userSecretsFilename = "user.groovy"
+final String adminSecretsFilename = "adminSecrets.groovy"
+final String dbName = "Users"
 
-final def userSecretsFileName = "user.groovy"
-final def adminSecretsFilename = "adminSecrets.groovy"
-final def dbName = "Users"
+def logger = new MyLogger()
+
+// configure for admin
+final SecretsProviderFromConfigFile adminSecretsProvider = new SecretsProviderFromConfigFile(
+		fileLocation: new File(adminSecretsFilename).toURL()
+)
+final SqlProvider adminSqlProvider = new MySqlProvider(
+		secretsProvider: adminSecretsProvider,
+		logger: logger
+)
+final DatabaseOperations adminDatabaseOperations = new DatabaseOperations(
+		adminSqlProvider: adminSqlProvider,
+		dbName: dbName,
+		logger: logger
+)
+
+// configure for user
+final SecretsProvider userSecretsProvider = new SecretsProviderFromConfigFile(
+		fileLocation: new File(userSecretsFilename).toURL()
+) as SecretsProvider
+final SqlProvider userSqlProvider = new MySqlProvider(
+		dbName: dbName,
+		secretsProvider: userSecretsProvider,
+		logger: logger
+)
+final DatabaseSetup databaseSetup = new DatabaseSetup(
+		databaseOperations: adminDatabaseOperations,
+		logger: logger
+)
+
+final CreateUserInterface createUserInterface = new CreateUserInterface(
+		dbName: dbName,
+		userSecretsProvider: userSecretsProvider,
+		databaseSetup: databaseSetup,
+		logger: logger
+)
+
+logger.info("START CreateUser")
 
 def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup]')
 cli.with {
@@ -62,191 +105,78 @@ if (options.help) {
 	return
 }
 
-def normalUserSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(userSecretsFileName).toURL())
-
-Map configuration = [
-		'hibernate.hbm2ddl.auto': '',
-		'dataSource.url'        : "jdbc:mysql://localhost:3306/$dbName?useSSL=false",
-		'dataSource.username'   : normalUserSecretsProvider.username,
-		'dataSource.password'   : normalUserSecretsProvider.password,
-		'hibernate.dialect'     : 'org.hibernate.dialect.MySQLDialect'
-]
-// need this for GORM mapping
-HibernateDatastore datastore = new HibernateDatastore(configuration, User)
-
 if (options.selfSetup) {
-	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(adminSecretsFilename).toURL())
-	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
-	DatabaseOperations databaseOperations = new DatabaseOperations(
-			adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
-	)
-
-	doSelfSetup(databaseOperations, normalUserSecretsProvider, logger)
+	createUserInterface.doSelfSetup(userSqlProvider)
 }
 
 if (options.selfTest) {
-	doSelfTest(logger)
+	createUserInterface.doSelfTest() ? resultOK() : exitWithError()
 }
 
 if (options.create) {
-	doCreate(logger)
+	createUserInterface.doCreate()
 	resultOK()
 }
 
 if (options.selfCleanup) {
-	def adminSecretsProvider = new UserSecretsProviderFromConfigFile(fileLocation: new File(adminSecretsFilename).toURL())
-	def adminSqlProvider = new MySqlProvider(secretsProvider: adminSecretsProvider)
-	DatabaseOperations databaseOperations = new DatabaseOperations(
-			adminSqlProvider: adminSqlProvider, dbName: dbName, logger: logger
-	)
-
-	doSelfCleanup(databaseOperations, normalUserSecretsProvider, logger)
-}
-
-private static doCreate(logger) {
-	def scanner = new Scanner(System.in)
-
-	def commandUser = new CommandLineUserMapping()
-	def parameters = commandUser.mapping.collectEntries { columnName, labelName ->
-		println labelName
-		def value = scanner.nextLine()
-		return ["$columnName": value]
-	}
-
-	createUser(parameters, logger)
-}
-
-static def createUser(parameters, logger) {
-	logger.info("Creating user $parameters")
-
-	User.withTransaction {
-		def result = new User(parameters).save()
-		return result != null
-	}
-}
-
-static def doSelfSetup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
-	logger.info("START self setup")
-	databaseOperations.createDatabase()
-	databaseOperations.createUser(userSecretsProvider)
-
-	MySqlProvider userSqlProvider = new MySqlProvider(
-			dbName: databaseOperations.dbName,
-			secretsProvider: userSecretsProvider,
-	)
-
-	def command = new Command(sqlProvider: userSqlProvider, logger: logger)
-	createTable(command, logger)
-
-	logger.info("END self setup")
-}
-
-static def existsTable(sqlProvider) {
-	def rows = sqlProvider.firstRow(
-			"""
-	SHOW TABLES LIKE 'USER';
-""")
-	return (rows?.size() == 1)
-}
-
-static def doSelfCleanup(DatabaseOperations databaseOperations, userSecretsProvider, logger) {
-	logger.info("START self cleanup")
-
-	databaseOperations.dropDatabase()
-	databaseOperations.dropUser(userSecretsProvider.username)
-
-	logger.info("END self cleanup")
-}
-
-static def createTable(command, logger) {
-	if (!existsTable(command.sqlProvider)) {
-		command.executeSqlCommand(
-				"""CREATE TABLE `USER`(
-		                `ID` INT(11) NOT NULL AUTO_INCREMENT,
-		                `FIRST_NAME` VARCHAR(500) NOT NULL,
-		                `LAST_NAME` VARCHAR(500) NOT NULL,
-		                `IS_ACTIVE` BOOLEAN NOT NULL,
-		                PRIMARY KEY(`ID`)
-		        )""", "createTableUser", 1
-		)
-	} else {
-		logger.info("Table USER exists; nothing to do")
-	}
-}
-
-static def doSelfTest(logger) {
-	logger.info("START SELF-TEST")
-	def firstName = RandomStringUtils.randomAlphabetic(100)
-	def lastName = RandomStringUtils.randomAlphabetic(100)
-	def parameters = [firstName: firstName, lastName: lastName, isActive: false]
-
-	try {
-		testCreateUser(parameters, logger)
-		logger.info("SUCCESS SELF-TEST")
-	} finally {
-		try {
-			deleteTestUser(parameters)
-			logger.info("Clean up successful")
-		} catch (Exception exc) {
-			logger.severe("Clean up error $exc.message. Can't recover, will stop")
-		}
-	}
-	logger.info("END SELF-TEST")
-}
-
-private static deleteTestUser(parameters) {
-	User.withTransaction {
-		def user = User.findByFirstNameAndLastNameAndIsActive(parameters.firstName, parameters.lastName, false)
-		user.delete()
-	}
-}
-
-private static assertUserWasCreated(firstName, lastName) {
-	User.withTransaction {
-		assert User.findAllByFirstNameAndLastName(firstName, lastName).size() == 1
-	}
-}
-
-private static testCreateUser(parameters, logger) {
-	def result = createUser(parameters, logger)
-
-	assert result, "Could not create a user with $parameters"
-	assertUserWasCreated(parameters.firstName, parameters.lastName)
+	createUserInterface.doSelfCleanup()
 }
 
 logger.info("END CreateUser")
 
+class CreateUserInterface {
+	String dbName
+	DatabaseSetup databaseSetup
+	SecretsProvider userSecretsProvider
+	def logger
 
-class UserSecretsProviderFromConfigFile {
-	def config = new ConfigSlurper()
-	URL fileLocation
-
-	def getUsername() {
-		def secrets = config.parse(fileLocation)
-		return secrets.username
+	Boolean doSelfTest() {
+		new SelfTest(
+				productionInstance: this,
+				logger: logger,
+		).run()
 	}
 
-	def getPassword() {
-		def secrets = config.parse(fileLocation)
-		return secrets.password
+	def doCreate() {
+		def commandUser = new CommandLineUserMapping()
+		def parameterReader = new ParameterReader(scanner: new Scanner(System.in))
+		def parameters = parameterReader.readParameters(commandUser.mapping)
+
+		logger.info("Creating user $parameters")
+		createUser(parameters)
+	}
+
+	def createUser(parameters) {
+		doGormMapping()
+		User.withTransaction {
+			return new User(parameters).save()
+		}
+	}
+
+	def doSelfSetup(SqlProvider userSqlProvider) {
+		this.databaseSetup.createDatabaseUserAndSchema(userSecretsProvider) {
+			userSqlProvider.createTable(User.tableName, User.createTable)
+		}
+	}
+
+	def doSelfCleanup() {
+		this.databaseSetup.dropDatabaseAndUser(userSecretsProvider.username)
+	}
+
+
+	private doGormMapping() {
+		Map configuration = [
+				'hibernate.hbm2ddl.auto': '',
+				'dataSource.url'        : "jdbc:mysql://localhost:3306/$dbName?useSSL=false",
+				'dataSource.username'   : userSecretsProvider.username,
+				'dataSource.password'   : userSecretsProvider.password,
+				'hibernate.dialect'     : 'org.hibernate.dialect.MySQLDialect'
+		]
+		// need this for GORM mapping
+		HibernateDatastore datastore = new HibernateDatastore(configuration, User)
 	}
 }
 
-class MyLogger {
-	def info(message) {
-		log("INFO", message)
-	}
-
-	def severe(message) {
-		log("SEVERE", message)
-	}
-
-	private log(prefix, message) {
-		def date = new Date().format("DD/MM/YYYY HH:mm:ss")
-
-		System.err.println "$date $prefix: $message"
-	}
-}
 
 class DomainUser {
 	String firstName
@@ -256,16 +186,79 @@ class DomainUser {
 
 @Entity
 class User extends DomainUser implements GormEntity<User> {
+	final static tableName = 'USER'
+
 	static mapping = {
-		table 'USER'
+		table tableName
 		version false
 		autoTimestamp false
 	}
+
+	static createTable = """\
+CREATE TABLE `USER`(
+	`ID` INT(11) NOT NULL AUTO_INCREMENT,
+	`FIRST_NAME` VARCHAR(500) NOT NULL,
+	`LAST_NAME` VARCHAR(500) NOT NULL,
+	`IS_ACTIVE` BOOLEAN NOT NULL,
+	PRIMARY KEY(`ID`)
+)"""
 }
 
-class CommandLineUserMapping{
+class CommandLineUserMapping {
 	static mapping = [
 			firstName: "First Name:",
 			lastName : "Last Name:"
 	]
+}
+
+class SelfTest {
+	CreateUserInterface productionInstance
+
+	private user
+	def logger
+
+
+	def run() {
+		try {
+			logger.info("START SELF-TEST")
+			def createUserInterface = productionInstance
+			testCreate(createUserInterface)
+			logger.info("SUCCESS SELF-TEST")
+			return true
+		} catch (Exception exc) {
+			logger.severe "FAILED SELF-TEST: exception ${exc.toString()}"
+			return false
+		} finally {
+			logger.info("END SELF-TEST")
+		}
+	}
+
+	def testCreate(createUserInterface) {
+		testCreateUser(createUserInterface)
+		deleteUser()
+	}
+
+	private deleteUser() {
+		User.withTransaction {
+			user.delete()
+		}
+		logger.info("SelfTest: Clean up successful")
+	}
+
+	static def assertUserWasCreated(firstName, lastName) {
+		User.withTransaction {
+			assert User.findAllByFirstNameAndLastName(firstName, lastName).size() == 1, "SelfTest: could not find created user"
+		}
+	}
+
+	def testCreateUser(CreateUserInterface createUserInterface) {
+		def firstName = RandomStringUtils.randomAlphabetic(100)
+		def lastName = RandomStringUtils.randomAlphabetic(100)
+		def parameters = [firstName: firstName, lastName: lastName, isActive: false]
+
+		user = createUserInterface.createUser(parameters)
+
+		assert user, "SelfTest: Could not create a user with $parameters"
+		assertUserWasCreated(parameters.firstName, parameters.lastName)
+	}
 }
