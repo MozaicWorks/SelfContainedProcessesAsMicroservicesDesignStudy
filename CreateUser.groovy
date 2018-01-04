@@ -28,37 +28,78 @@ final String dbName = "Users"
 def logger = new MyLogger()
 
 // configure for admin
-final SecretsProviderFromConfigFile adminSecretsProvider = new SecretsProviderFromConfigFile(
-		fileLocation: new File(adminSecretsFilename).toURL()
-)
-final SqlProvider adminSqlProvider = new MySqlProvider(
-		secretsProvider: adminSecretsProvider,
-		logger: logger
-)
-final DatabaseOperations adminDatabaseOperations = new DatabaseOperations(
-		adminSqlProvider: adminSqlProvider,
-		dbName: dbName,
-		logger: logger
-)
-final DatabaseSetup databaseSetup = new DatabaseSetup(
-		databaseOperations: adminDatabaseOperations,
-		logger: logger
-)
+class DbAdminConfigHolder {
+	def dbName
+	def logger
+	def secretsFilename
+
+	SecretsProvider getSecretsProvider() {
+		return new SecretsProviderFromConfigFile(
+				fileLocation: new File(secretsFilename).toURL()
+		)
+	}
+
+	final DatabaseSetup getDatabaseSetup() {
+		return new DatabaseSetup(
+				databaseOperations:
+						new DatabaseOperations(
+								adminSqlProvider:
+										new MySqlProvider(
+												secretsProvider: secretsProvider,
+												logger: logger
+										),
+								dbName: dbName,
+								logger: logger
+						),
+				logger: logger
+		)
+	}
+}
+
+def adminConfigHolder = new DbAdminConfigHolder(secretsFilename: adminSecretsFilename, dbName: dbName, logger: logger)
 
 // configure for user
-final SecretsProvider userSecretsProvider = new SecretsProviderFromConfigFile(
-		fileLocation: new File(userSecretsFilename).toURL()
-) as SecretsProvider
-final SqlProvider userSqlProvider = new MySqlProvider(
-		dbName: dbName,
-		secretsProvider: userSecretsProvider,
-		logger: logger
-)
+
+class DbUserConfigHolder {
+	def dbName
+	def logger
+	SecretsProvider secretsProvider
+
+	DbUserConfigHolder(params) {
+		this.dbName = params.dbName
+		this.logger = params.logger
+
+		if (params.secretsFilename) {
+			this.secretsProvider = secretsProviderFromConfigFile(params.secretsFilename)
+		} else {
+			this.secretsProvider = params.secretsProvider
+		}
+	}
+
+	private SecretsProvider getSecretsProvider() {
+		this.secretsProvider
+	}
+
+	private static SecretsProvider secretsProviderFromConfigFile(secretsFilename) {
+		return new SecretsProviderFromConfigFile(
+				fileLocation: new File(secretsFilename).toURL()
+		) as SecretsProvider
+	}
+
+	SqlProvider getSqlProvider() {
+		new MySqlProvider(
+				dbName: dbName,
+				secretsProvider: secretsProvider,
+				logger: logger
+		)
+	}
+}
+
+def userConfigHolder = new DbUserConfigHolder(dbName: dbName, secretsFilename: userSecretsFilename, logger: logger)
 
 final CreateUserInterface createUserInterface = new CreateUserInterface(
-		dbName: dbName,
-		userSecretsProvider: userSecretsProvider,
-		databaseSetup: databaseSetup,
+		userConfigHolder: userConfigHolder,
+		adminConfigHolder: adminConfigHolder,
 		logger: logger
 )
 
@@ -106,11 +147,11 @@ if (options.help) {
 }
 
 if (options.selfSetup) {
-	createUserInterface.doSelfSetup(userSqlProvider)
+	createUserInterface.doSelfSetup()
 }
 
 if (options.selfTest) {
-	createUserInterface.doSelfTest(adminSqlProvider) ? resultOK() : exitWithError()
+	createUserInterface.doSelfTest() ? resultOK() : exitWithError()
 }
 
 if (options.create) {
@@ -125,38 +166,33 @@ if (options.selfCleanup) {
 logger.info("END CreateUser")
 
 class CreateUserInterface {
-	String dbName
-	DatabaseSetup databaseSetup
-	SecretsProvider userSecretsProvider
+
+	DbUserConfigHolder userConfigHolder
+	DbAdminConfigHolder adminConfigHolder
 	def logger
 
-	Boolean doSelfTest(adminSqlProvider) {
+	Boolean doSelfTest() {
 		def testDbName = "test" + RandomStringUtils.randomAlphabetic(20)
-		final DatabaseOperations adminDatabaseOperations = new DatabaseOperations(
-				adminSqlProvider: adminSqlProvider,
+		def testDbUserName = "test" + RandomStringUtils.randomAlphabetic(20)
+		def testDbPassword = "test" + RandomStringUtils.randomAlphabetic(100)
+		def userConfigHolder = new DbUserConfigHolder(
 				dbName: testDbName,
+				secretsProvider: new SecretsProviderInMemory(username: testDbUserName, password: testDbPassword),
 				logger: logger
 		)
-		final DatabaseSetup databaseSetup = new DatabaseSetup(
-				databaseOperations: adminDatabaseOperations,
+		def adminConfigHolder = new DbAdminConfigHolder(
+				dbName: testDbName,
+				secretsFilename: adminConfigHolder.secretsFilename,
 				logger: logger
 		)
-
-		final userSecretsProvider = new SecretsProviderInMemory(
-				username: "test" + RandomStringUtils.randomAlphabetic(20),
-				password: RandomStringUtils.randomAlphabetic(100)
-		)
-		def userSqlProvider = new MySqlProvider(dbName: testDbName, secretsProvider: userSecretsProvider, logger: logger)
 
 		new SelfTest(
 				testInstance: new CreateUserInterface(
-						dbName: testDbName,
-						userSecretsProvider: userSecretsProvider,
-						databaseSetup: databaseSetup,
+						userConfigHolder: userConfigHolder,
+						adminConfigHolder: adminConfigHolder,
 						logger: logger
 				),
 				productionInstance: this,
-				userSqlProvider: userSqlProvider,
 				logger: logger
 		).run()
 	}
@@ -177,18 +213,22 @@ class CreateUserInterface {
 		}
 	}
 
-	def doSelfSetup(SqlProvider userSqlProvider) {
-		this.databaseSetup.createDatabaseUserAndSchema(userSecretsProvider) {
-			userSqlProvider.createTable(User.tableName, User.createTable)
+	def doSelfSetup() {
+		adminConfigHolder.databaseSetup.createDatabaseUserAndSchema(userConfigHolder.secretsProvider) {
+			userConfigHolder.sqlProvider.createTable(User.tableName, User.createTable)
 		}
 	}
 
 	def doSelfCleanup() {
-		this.databaseSetup.dropDatabaseAndUser(userSecretsProvider.username)
+		adminConfigHolder.databaseSetup.dropDatabaseAndUser(
+				userConfigHolder.secretsProvider.username
+		)
 	}
 
 
 	private doGormMapping() {
+		def dbName = userConfigHolder.dbName
+		def userSecretsProvider = userConfigHolder.secretsProvider
 		Map configuration = [
 				'hibernate.hbm2ddl.auto': '',
 				'dataSource.url'        : "jdbc:mysql://localhost:3306/$dbName?useSSL=false",
@@ -241,13 +281,12 @@ class SelfTest {
 
 	private user
 	def logger
-	MySqlProvider userSqlProvider
 
 	def run() {
 		try {
 			logger.info("START SELF-TEST")
 			def createUserInterface = testInstance
-			createUserInterface.doSelfSetup(userSqlProvider)
+			createUserInterface.doSelfSetup()
 			testCreate(createUserInterface)
 			createUserInterface.doSelfCleanup()
 			logger.info("SUCCESS SELF-TEST")
