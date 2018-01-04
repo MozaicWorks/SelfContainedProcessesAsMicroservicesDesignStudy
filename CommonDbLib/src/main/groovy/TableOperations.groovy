@@ -7,7 +7,7 @@ class TableOperations {
 		if (!existsTable(sqlProvider, tableName)) {
 			sqlProvider.executeSqlCommand(
 					createTableCommand,
-					"createTable$tableName",
+					"createTable $tableName",
 					0
 			)
 		} else {
