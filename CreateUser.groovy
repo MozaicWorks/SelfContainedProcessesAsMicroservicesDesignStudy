@@ -14,159 +14,95 @@ import grails.gorm.annotation.Entity
 		@Grab("mysql:mysql-connector-java:5.1.39"),
 		@GrabConfig(systemClassLoader = true)
 ])
+import grails.gorm.annotation.Entity
+@Grapes([
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@Grab("org.apache.commons:commons-lang3:3.7"),
+		@Grab("org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE"),
+		@Grab("mysql:mysql-connector-java:5.1.39"),
+		@GrabConfig(systemClassLoader = true)
+])
 
 import grails.gorm.annotation.Entity
 import grails.persistence.*
 import org.apache.commons.lang3.RandomStringUtils
 import org.grails.datastore.gorm.GormEntity
 import org.grails.orm.hibernate.HibernateDatastore
+import static CommandLineHelpers.*
 
-final String userSecretsFilename = "user.groovy"
-final String adminSecretsFilename = "adminSecrets.groovy"
-final String dbName = "Users"
+execute()
 
-def logger = new MyLogger()
+private execute() {
+	def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup]')
 
-// configure for admin
-class DbAdminConfigHolder {
-	def dbName
-	def logger
-	def secretsFilename
-
-	SecretsProvider getSecretsProvider() {
-		return new SecretsProviderFromConfigFile(
-				fileLocation: new File(secretsFilename).toURL()
-		)
+	cli.with {
+		help longOpt: 'help', 'show usage information'
+		create longOpt: 'create', 'creates a user'
+		selfSetup longOpt: 'self setup', 'creates database and user'
+		selfTest longOpt: 'self test', 'runs self test'
+		selfCleanup longOpt: 'self cleanup', 'drops database and user'
+		// need a self backup
 	}
 
-	final DatabaseSetup getDatabaseSetup() {
-		return new DatabaseSetup(
-				databaseOperations:
-						new DatabaseOperations(
-								adminSqlProvider:
-										new MySqlProvider(
-												secretsProvider: secretsProvider,
-												logger: logger
-										),
-								dbName: dbName,
-								logger: logger
-						),
-				logger: logger
-		)
+	def options = cli.parse(args)
+
+	if (!options) {
+		cli.usage()
+		printError("Pass the correct arguments")
+		exitWithError()
 	}
-}
-
-def adminConfigHolder = new DbAdminConfigHolder(secretsFilename: adminSecretsFilename, dbName: dbName, logger: logger)
-
-// configure for user
-
-class DbUserConfigHolder {
-	def dbName
-	def logger
-	SecretsProvider secretsProvider
-
-	DbUserConfigHolder(params) {
-		this.dbName = params.dbName
-		this.logger = params.logger
-
-		if (params.secretsFilename) {
-			this.secretsProvider = secretsProviderFromConfigFile(params.secretsFilename)
-		} else {
-			this.secretsProvider = params.secretsProvider
-		}
+	if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest) {
+		cli.usage()
+		printError("Pass the correct arguments")
+		exitWithError()
 	}
 
-	private SecretsProvider getSecretsProvider() {
-		this.secretsProvider
+	if (options.help) {
+		cli.usage()
+		resultOK()
+		return
 	}
 
-	private static SecretsProvider secretsProviderFromConfigFile(secretsFilename) {
-		return new SecretsProviderFromConfigFile(
-				fileLocation: new File(secretsFilename).toURL()
-		) as SecretsProvider
+	if (options.selfSetup) {
+		CreateUserInterfaceFactory.create().doSelfSetup()
+		resultOK()
+		return
 	}
 
-	SqlProvider getSqlProvider() {
-		new MySqlProvider(
-				dbName: dbName,
-				secretsProvider: secretsProvider,
-				logger: logger
-		)
+	if (options.selfTest) {
+		CreateUserInterfaceFactory.create().doSelfTest() ? resultOK() : exitWithError()
+		return
+	}
+
+	if (options.create) {
+		CreateUserInterfaceFactory.create().doCreate()
+		resultOK()
+		return
+	}
+
+	if (options.selfCleanup) {
+		CreateUserInterfaceFactory.create().doSelfCleanup()
+		resultOK()
+		return
 	}
 }
 
-def userConfigHolder = new DbUserConfigHolder(dbName: dbName, secretsFilename: userSecretsFilename, logger: logger)
 
-final CreateUserInterface createUserInterface = new CreateUserInterface(
-		userConfigHolder: userConfigHolder,
-		adminConfigHolder: adminConfigHolder,
-		logger: logger
-)
+class CommandLineHelpers {
+	static void printError(message) {
+		println "ERROR: $message"
+	}
 
-logger.info("START CreateUser")
+	static resultOK() {
+		println "OK"
+	}
 
-def cli = new CliBuilder(usage: 'createUser -[create|selfSetup|selfTest|selfCleanup]')
-cli.with {
-	help longOpt: 'help', 'show usage information'
-	create longOpt: 'create', 'creates a user'
-	selfSetup longOpt: 'self setup', 'creates database and user'
-	selfTest longOpt: 'self test', 'runs self test'
-	selfCleanup longOpt: 'self cleanup', 'drops database and user'
-	// need a self backup
+	static exitWithError() {
+		throw new RuntimeException()
+	}
 }
-
-def options = cli.parse(args)
-if (!options) {
-	cli.usage()
-	printError("Pass the correct arguments")
-	exitWithError()
-}
-
-if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest) {
-	cli.usage()
-	printError("Pass the correct arguments")
-	exitWithError()
-}
-
-void printError(message) {
-	println "ERROR: $message"
-}
-
-private static exitWithError() {
-	throw new RuntimeException()
-}
-
-private static resultOK() {
-	println "OK"
-}
-
-if (options.help) {
-	cli.usage()
-	resultOK()
-	return
-}
-
-if (options.selfSetup) {
-	createUserInterface.doSelfSetup()
-}
-
-if (options.selfTest) {
-	createUserInterface.doSelfTest() ? resultOK() : exitWithError()
-}
-
-if (options.create) {
-	createUserInterface.doCreate()
-	resultOK()
-}
-
-if (options.selfCleanup) {
-	createUserInterface.doSelfCleanup()
-}
-
-logger.info("END CreateUser")
 
 class CreateUserInterface {
-
 	DbUserConfigHolder userConfigHolder
 	DbAdminConfigHolder adminConfigHolder
 	def logger
@@ -175,23 +111,15 @@ class CreateUserInterface {
 		def testDbName = "test" + RandomStringUtils.randomAlphabetic(20)
 		def testDbUserName = "test" + RandomStringUtils.randomAlphabetic(20)
 		def testDbPassword = "test" + RandomStringUtils.randomAlphabetic(100)
-		def userConfigHolder = new DbUserConfigHolder(
-				dbName: testDbName,
-				secretsProvider: new SecretsProviderInMemory(username: testDbUserName, password: testDbPassword),
-				logger: logger
-		)
-		def adminConfigHolder = new DbAdminConfigHolder(
-				dbName: testDbName,
-				secretsFilename: adminConfigHolder.secretsFilename,
-				logger: logger
+		def adminSecretsFileName = adminConfigHolder.secretsFilename
+		def userSecretsProvider = new SecretsProviderInMemory(username: testDbUserName, password: testDbPassword)
+
+		CreateUserInterface testInstance = CreateUserInterfaceFactory.createWithUserSecretsProvider(
+				testDbName, userSecretsProvider, adminSecretsFileName, logger
 		)
 
 		new SelfTest(
-				testInstance: new CreateUserInterface(
-						userConfigHolder: userConfigHolder,
-						adminConfigHolder: adminConfigHolder,
-						logger: logger
-				),
+				testInstance: testInstance,
 				productionInstance: this,
 				logger: logger
 		).run()
@@ -241,7 +169,6 @@ class CreateUserInterface {
 	}
 }
 
-
 class DomainUser {
 	String firstName
 	String lastName
@@ -274,6 +201,7 @@ class CommandLineUserMapping {
 			lastName : "Last Name:"
 	]
 }
+
 
 class SelfTest {
 	CreateUserInterface productionInstance
@@ -327,4 +255,101 @@ class SelfTest {
 		assert user, "SelfTest: Could not create a user with $parameters"
 		assertUserWasCreated(parameters.firstName, parameters.lastName)
 	}
+}
+
+class DbAdminConfigHolder {
+	def dbName
+	def logger
+	def secretsFilename
+
+	SecretsProvider getSecretsProvider() {
+		return new SecretsProviderFromConfigFile(
+				fileLocation: new File(secretsFilename).toURL()
+		)
+	}
+
+	final DatabaseSetup getDatabaseSetup() {
+		return new DatabaseSetup(
+				databaseOperations:
+						new DatabaseOperations(
+								adminSqlProvider:
+										new MySqlProvider(
+												secretsProvider: secretsProvider,
+												logger: logger
+										),
+								dbName: dbName,
+								logger: logger
+						),
+				logger: logger
+		)
+	}
+}
+
+class DbUserConfigHolder {
+	def dbName
+	def logger
+	SecretsProvider secretsProvider
+
+	DbUserConfigHolder(params) {
+		this.dbName = params.dbName
+		this.logger = params.logger
+
+		if (params.secretsFilename) {
+			this.secretsProvider = secretsProviderFromConfigFile(params.secretsFilename)
+		} else {
+			this.secretsProvider = params.secretsProvider
+		}
+	}
+
+	private SecretsProvider getSecretsProvider() {
+		this.secretsProvider
+	}
+
+	private static SecretsProvider secretsProviderFromConfigFile(secretsFilename) {
+		return new SecretsProviderFromConfigFile(
+				fileLocation: new File(secretsFilename).toURL()
+		) as SecretsProvider
+	}
+
+	SqlProvider getSqlProvider() {
+		new MySqlProvider(
+				dbName: dbName,
+				secretsProvider: secretsProvider,
+				logger: logger
+		)
+	}
+}
+
+class CreateUserInterfaceFactory {
+	static CreateUserInterface create(String dbName = "Users", String userSecretsFilename = "user.groovy", String adminSecretsFilename = "adminSecrets.groovy", MyLogger logger = new MyLogger()) {
+		def userConfigHolder = userConfigHolderFromFilename(dbName, userSecretsFilename, logger)
+		return doCreate(userConfigHolder, adminSecretsFilename, dbName, logger)
+	}
+
+	static CreateUserInterface createWithUserSecretsProvider(String dbName, SecretsProvider userSecretsProvider, adminSecretsFileName, logger) {
+		def userConfigHolder = userConfigHolderFromProvider(dbName, userSecretsProvider, logger)
+		return doCreate(userConfigHolder, adminSecretsFileName, dbName, logger)
+	}
+
+	private
+	static doCreate(DbUserConfigHolder userConfigHolder, String adminSecretsFilename, String dbName, MyLogger logger) {
+		new CreateUserInterface(
+				userConfigHolder: userConfigHolder,
+				adminConfigHolder: new DbAdminConfigHolder(secretsFilename: adminSecretsFilename, dbName: dbName, logger: logger),
+				logger: logger
+		)
+	}
+
+	private static userConfigHolderFromFilename(String dbName, String userSecretsFilename, MyLogger logger) {
+		new DbUserConfigHolder(dbName: dbName, secretsFilename: userSecretsFilename, logger: logger)
+	}
+
+	private static userConfigHolderFromProvider(String dbName, SecretsProvider userSecretsProvider, logger) {
+		return new DbUserConfigHolder(
+				dbName: dbName,
+				secretsProvider: userSecretsProvider,
+				logger: logger
+		)
+	}
+
 }
