@@ -40,6 +40,10 @@ final DatabaseOperations adminDatabaseOperations = new DatabaseOperations(
 		dbName: dbName,
 		logger: logger
 )
+final DatabaseSetup databaseSetup = new DatabaseSetup(
+		databaseOperations: adminDatabaseOperations,
+		logger: logger
+)
 
 // configure for user
 final SecretsProvider userSecretsProvider = new SecretsProviderFromConfigFile(
@@ -48,10 +52,6 @@ final SecretsProvider userSecretsProvider = new SecretsProviderFromConfigFile(
 final SqlProvider userSqlProvider = new MySqlProvider(
 		dbName: dbName,
 		secretsProvider: userSecretsProvider,
-		logger: logger
-)
-final DatabaseSetup databaseSetup = new DatabaseSetup(
-		databaseOperations: adminDatabaseOperations,
 		logger: logger
 )
 
@@ -110,7 +110,7 @@ if (options.selfSetup) {
 }
 
 if (options.selfTest) {
-	createUserInterface.doSelfTest() ? resultOK() : exitWithError()
+	createUserInterface.doSelfTest(adminSqlProvider) ? resultOK() : exitWithError()
 }
 
 if (options.create) {
@@ -130,10 +130,34 @@ class CreateUserInterface {
 	SecretsProvider userSecretsProvider
 	def logger
 
-	Boolean doSelfTest() {
+	Boolean doSelfTest(adminSqlProvider) {
+		def testDbName = "test" + RandomStringUtils.randomAlphabetic(20)
+		final DatabaseOperations adminDatabaseOperations = new DatabaseOperations(
+				adminSqlProvider: adminSqlProvider,
+				dbName: testDbName,
+				logger: logger
+		)
+		final DatabaseSetup databaseSetup = new DatabaseSetup(
+				databaseOperations: adminDatabaseOperations,
+				logger: logger
+		)
+
+		final userSecretsProvider = new SecretsProviderInMemory(
+				username: "test" + RandomStringUtils.randomAlphabetic(20),
+				password: RandomStringUtils.randomAlphabetic(100)
+		)
+		def userSqlProvider = new MySqlProvider(dbName: testDbName, secretsProvider: userSecretsProvider, logger: logger)
+
 		new SelfTest(
+				testInstance: new CreateUserInterface(
+						dbName: testDbName,
+						userSecretsProvider: userSecretsProvider,
+						databaseSetup: databaseSetup,
+						logger: logger
+				),
 				productionInstance: this,
-				logger: logger,
+				userSqlProvider: userSqlProvider,
+				logger: logger
 		).run()
 	}
 
@@ -213,16 +237,19 @@ class CommandLineUserMapping {
 
 class SelfTest {
 	CreateUserInterface productionInstance
+	CreateUserInterface testInstance
 
 	private user
 	def logger
-
+	MySqlProvider userSqlProvider
 
 	def run() {
 		try {
 			logger.info("START SELF-TEST")
-			def createUserInterface = productionInstance
+			def createUserInterface = testInstance
+			createUserInterface.doSelfSetup(userSqlProvider)
 			testCreate(createUserInterface)
+			createUserInterface.doSelfCleanup()
 			logger.info("SUCCESS SELF-TEST")
 			return true
 		} catch (Exception exc) {
