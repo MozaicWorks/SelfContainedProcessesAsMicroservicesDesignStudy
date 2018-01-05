@@ -23,10 +23,10 @@ private execute() {
 	cli.with {
 		help longOpt: 'help', 'show usage information'
 		create longOpt: 'create', 'creates a user'
-		selfSetup longOpt: 'self setup', 'creates database and user'
-		selfTest longOpt: 'self test', 'runs self test'
-		selfCleanup longOpt: 'self cleanup', 'drops database and user'
-		// need a self backup
+		selfSetup longOpt: 'self-setup', 'creates database and user'
+		selfTest longOpt: 'self-test', 'runs self test'
+		selfCleanup longOpt: 'self-cleanup', 'drops database and user'
+		selfBackup longOpt: 'self-backup', 'backs up the database'
 	}
 
 	def options = cli.parse(args)
@@ -36,7 +36,7 @@ private execute() {
 		printError("Pass the correct arguments")
 		exitWithError()
 	}
-	if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest) {
+	if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest && !options.selfBackup) {
 		cli.usage()
 		printError("Pass the correct arguments")
 		exitWithError()
@@ -67,6 +67,12 @@ private execute() {
 
 	if (options.selfCleanup) {
 		CreateUserInterfaceFactory.create().doSelfCleanup()
+		resultOK()
+		return
+	}
+
+	if (options.selfBackup) {
+		CreateUserInterfaceFactory.create().doSelfBackup()
 		resultOK()
 		return
 	}
@@ -136,6 +142,10 @@ class CreateUserInterface {
 		adminConfigHolder.databaseSetup.dropDatabaseAndUser(
 				userConfigHolder.secretsProvider.username
 		)
+	}
+
+	def doSelfBackup() {
+		adminConfigHolder.databaseSetup.backup(userConfigHolder.secretsProvider, userConfigHolder.dbName)
 	}
 
 
