@@ -24,40 +24,96 @@ class DatabaseSetup {
 	}
 
 	def backup(SecretsProvider secretsProvider, dbName) {
-		logger.info("START backup")
-
 		def postfix = new Date().format("YYYYMMDDHHSS")
-		def filename = "backup-${postfix}.sql"
-		def serr = new StringBuilder()
-		def sout = new StringBuilder()
 
-		// create file that allows passwordless login
-		def configFile = new File(System.getProperty("user.home"), "/.my.cnf")
-		configFile.createNewFile()
-		configFile.write("""\
-[mysqldump]
-password=${secretsProvider.password}
-""")
-		def process = ["mysqldump", "-u${secretsProvider.username}", "$dbName"].execute()
-		process.waitFor()
-		process.consumeProcessErrorStream(serr)
-		process.consumeProcessOutputStream(sout)
+		def filename = "$dbName/backup-${postfix}.sql"
 
-		def backupFile = new File(filename)
-		backupFile.write(sout.toString())
+		return backupToFile(secretsProvider, dbName, filename)
+	}
 
-		def success = (process.exitValue() == 0)
+	def restore(SecretsProvider secretsProvider, dbName) {
+		logger.info("START restore")
+
+		def path = "$dbName/"
+		def file = new File(path).listFiles().max {
+			it.lastModified()
+		}
+		logger.info("Found file $file.name")
+
+		def mySqlPasswordlessLoginFile = new MySqlPasswordlessLoginFile(secretsProvider: secretsProvider)
+		mySqlPasswordlessLoginFile.createForClient()
+
+		logger.info("Running restore command")
+		def command = ["mysql", "-u${secretsProvider.username}", "$dbName"]
+		def result = executeCommandWithContent(command, file.text)
+		def success = (result.exitValue == 0)
 
 		if (success) {
-			logger.info("SUCCESS: Backed up to $filename")
+			logger.info(result.standardOutput)
+			logger.info("SUCCESS: Restored $file")
 		} else {
-			logger.info("ERROR: Backup failed")
+			logger.severe(result.standardOutput)
+			logger.severe(result.errorOutput)
+			logger.info("ERROR: Restore failed")
 		}
 
-		configFile.delete()
-		if (serr.toString().size() > 0) {
-			logger.severe(serr)
+		mySqlPasswordlessLoginFile.delete()
+
+		return success
+	}
+
+	private backupToFile(SecretsProvider secretsProvider, dbName, GString filename) {
+		logger.info("START backup")
+
+		def mySqlPasswordlessLoginFile = new MySqlPasswordlessLoginFile(secretsProvider: secretsProvider)
+		mySqlPasswordlessLoginFile.createForDump()
+
+		boolean success = doBackup(secretsProvider, dbName, filename)
+
+		mySqlPasswordlessLoginFile.delete()
+		return success
+	}
+
+	private doBackup(SecretsProvider secretsProvider, dbName, GString filename) {
+		def command = ["mysqldump", "-u${secretsProvider.username}", "$dbName"]
+		def result = executeCommand(command)
+		def success = (result.exitValue == 0)
+
+		if (success) {
+			def backupFile = new File(filename)
+			backupFile.createNewFile()
+			backupFile.write(result.standardOutput.toString())
+
+			logger.info("SUCCESS: Backed up to $filename")
+		} else {
+			logger.severe(result.errorOutput)
+			logger.info("ERROR: Backup failed")
 		}
 		return success
+	}
+
+	private executeCommand(List<String> command) {
+		def standardOutput = new StringBuilder()
+		def errorOutput = new StringBuilder()
+
+		def process = command.execute()
+		process.waitFor()
+		process.consumeProcessOutput(standardOutput, errorOutput)
+
+		return [exitValue: process.exitValue(), standardOutput: standardOutput, errorOutput: errorOutput]
+	}
+
+	private executeCommandWithContent(List<String> command, String content) {
+		def standardOutput = new StringBuilder()
+		def errorOutput = new StringBuilder()
+
+		def process = command.execute()
+		logger.info("Writing content to the process")
+		process.out.write(content.getBytes())
+		process.out.close()
+		process.waitFor()
+		process.consumeProcessOutput(standardOutput, errorOutput)
+
+		return [exitValue: process.exitValue(), standardOutput: standardOutput, errorOutput: errorOutput]
 	}
 }

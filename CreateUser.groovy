@@ -27,6 +27,7 @@ private execute() {
 		selfTest longOpt: 'self-test', 'runs self test'
 		selfCleanup longOpt: 'self-cleanup', 'drops database and user'
 		selfBackup longOpt: 'self-backup', 'backs up the database'
+		selfRestore longOpt: 'self-restore', 'restores the last backup'
 	}
 
 	def options = cli.parse(args)
@@ -36,7 +37,9 @@ private execute() {
 		printError("Pass the correct arguments")
 		exitWithError()
 	}
-	if (!options.create && !options.help && !options.selfSetup && !options.selfCleanup && !options.selfTest && !options.selfBackup) {
+	if (!options.create && !options.help && !options.selfSetup &&
+			!options.selfCleanup && !options.selfTest &&
+			!options.selfBackup && !options.selfRestore) {
 		cli.usage()
 		printError("Pass the correct arguments")
 		exitWithError()
@@ -73,6 +76,12 @@ private execute() {
 
 	if (options.selfBackup) {
 		CreateUserInterfaceFactory.create().doSelfBackup()
+		resultOK()
+		return
+	}
+
+	if (options.selfRestore) {
+		CreateUserInterfaceFactory.create().doSelfRestore()
 		resultOK()
 		return
 	}
@@ -146,6 +155,10 @@ class CreateUserInterface {
 
 	def doSelfBackup() {
 		adminConfigHolder.databaseSetup.backup(userConfigHolder.secretsProvider, userConfigHolder.dbName)
+	}
+
+	def doSelfRestore() {
+		adminConfigHolder.databaseSetup.restore(userConfigHolder.secretsProvider, userConfigHolder.dbName)
 	}
 
 
