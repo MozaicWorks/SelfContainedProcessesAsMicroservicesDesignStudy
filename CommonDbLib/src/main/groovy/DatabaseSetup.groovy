@@ -111,6 +111,7 @@ class DatabaseSetup {
 		logger.info("Writing content to the process")
 		process.out.write(content.getBytes())
 		process.out.close()
+		logger.info("Done writing content to the process")
 		process.waitFor()
 		process.consumeProcessOutput(standardOutput, errorOutput)
 
