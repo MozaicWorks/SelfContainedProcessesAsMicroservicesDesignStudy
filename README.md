@@ -48,7 +48,7 @@ This is still a distributed system with eventual consistency. Therefore, it will
 
 ## About design studies
 
-Design studies are a specific type of deliberate practice. You can find more information here: [](https://github.com/MozaicWorks/SoftwareDesignStudies).
+Design studies are a specific type of deliberate practice. You can find more information here: [https://github.com/MozaicWorks/SoftwareDesignStudies](https://github.com/MozaicWorks/SoftwareDesignStudies).
 
 ## Description
 
@@ -65,7 +65,7 @@ Setup instructions:
 
 * install mysql server
 * install groovy-server using [sdkman](http://sdkman.io/install.html). It's not mandatory, but it speeds up the script considerably
-* go to CommonDbLib. Run gradle build and copy the resulting library to the ~/.groovy/lib folder (create it if it's not there)
+* go to CommonDbLib. Run gradle build and copy the resulting library to the ~/.groovy/lib folder (create it if it's not there). Or install it to maven local
 * create two configuration files: `adminSecrets.groovy` and `user.groovy`, with the mysql credentials for a user who can create databases and for the db user, in the following format:
 
 ~~~~
@@ -81,6 +81,7 @@ password='password'
 * Add a runtime option for instrumentation (e.g. run-time performance reporting). I'm still thinking of solutions, but I think a simple one would be to implement a special program that can receive logs of different types. When running the process with a special option (e.g. --performance-report), it should start the program and report to it. This can be expanded for other reasons: security, debugging etc.
 * Add more scripts and integrate them into a web application. I'm considering using a messaging system for separation (e.g. rabbitmq)
 * Improve the database operations code. For example, use a special backup user, and ensure the most tight permissions are used for mysql
-* Improve the management of secrets. This is a typical problem on Linux, with no clear answer. Most people just use files with restricted access; maybe there are better ways.
+* Improve the management of secrets. This is a typical problem on Linux, with no clear answer. Most people just use files with restricted access; maybe there are better ways
 * Could we make the script install all dependencies, including the OS packages? Kind of like an embedded puppet script? It would be interesting to try
+* Generate the configuration files automatically - or at least a template
 
