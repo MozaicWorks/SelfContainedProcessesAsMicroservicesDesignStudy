@@ -1,0 +1,23 @@
+plugins  {
+	id 'com.github.johnrengelman.shadow' version '2.0.2'
+	id 'groovy'
+	id 'idea'
+	id 'application'
+}
+
+mainClassName='CreateUser'
+
+repositories {
+	jcenter()
+	mavenCentral()
+}
+
+dependencies {
+	compile 'org.codehaus.groovy:groovy-all:2.4.13'
+	compile 'commons-cli:commons-cli:1.2'
+	compile 'mysql:mysql-connector-java:5.1.39'
+	compile 'org.apache.commons:commons-lang3:3.7'
+	compile 'org.slf4j:slf4j-simple:1.7.25'
+	compile 'org.grails:grails-datastore-gorm-hibernate5:6.1.8.RELEASE'
+	compile project(':CommonDbLib')
+}
