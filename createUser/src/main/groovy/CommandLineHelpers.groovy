@@ -1,13 +1,11 @@
 class CommandLineHelpers {
-	static void printError(message) {
-		println "ERROR: $message"
-	}
-
-	static resultOK() {
+	static exitWithSuccess() {
 		println "OK"
+		System.exit(0)
 	}
 
-	static exitWithError() {
-		throw new RuntimeException()
+	static exitWithError(message) {
+		println("ERROR: ${message}")
+		System.exit(-1)
 	}
 }

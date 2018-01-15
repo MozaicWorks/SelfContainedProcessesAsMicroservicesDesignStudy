@@ -15,49 +15,40 @@ class CreateUser {
 		def options = cli.parse(args)
 		if (!options) {
 			cli.usage()
-			printError("Pass the correct arguments")
-			exitWithError()
+			exitWithError("Pass the correct arguments")
 		}
 		if (!options.create && !options.help && !options.selfSetup &&
 				!options.selfCleanup && !options.selfTest &&
 				!options.selfBackup && !options.selfRestore) {
 			cli.usage()
-			printError("Pass the correct arguments")
-			exitWithError()
+			exitWithError("Pass the correct arguments")
 		}
 		if (options.help) {
 			cli.usage()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 		if (options.selfSetup) {
 			CreateUserInterfaceFactory.create().doSelfSetup()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 		if (options.selfTest) {
-			CreateUserInterfaceFactory.create().doSelfTest() ? resultOK() : exitWithError()
-			return
+			CreateUserInterfaceFactory.create().doSelfTest() ? exitWithSuccess() : exitWithError()
 		}
 		if (options.create) {
 			CreateUserInterfaceFactory.create().doCreate()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 		if (options.selfCleanup) {
 			CreateUserInterfaceFactory.create().doSelfCleanup()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 		if (options.selfBackup) {
 			CreateUserInterfaceFactory.create().doSelfBackup()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 		if (options.selfRestore) {
 			CreateUserInterfaceFactory.create().doSelfRestore()
-			resultOK()
-			return
+			exitWithSuccess()
 		}
 	}
 }
